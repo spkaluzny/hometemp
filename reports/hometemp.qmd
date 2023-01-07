@@ -1,0 +1,127 @@
+---
+title: "Home Temperature"
+author: "Stephen Kaluzny"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+format:
+  html:
+    self-contained: true
+    theme: cerulean
+---
+
+- X theme: cerulean
+- theme: zephyr
+- theme: litera
+- theme: journal
+
+Load packages.
+```{r setup, message=FALSE}
+library(RSQLite)
+library(lubridate)
+library(ggplot2)
+```
+
+# Living Room
+
+## Data
+The data is written to an SQLite database on Raspbery Pi.
+Every hour the data is copied over to box.
+Every early morning, the data is copied from box to bolt.
+
+```{r readdb}
+dbfile <- here::here("data/hometemp_BMP180.db")
+sqlite <- dbDriver("SQLite")
+dbCon <- dbConnect(sqlite, dbfile)
+tempDF <- dbGetQuery(dbCon, 'select * from sensor_data')
+```
+
+Fix the time and temperature variables.
+```{r timetemp}
+tempDF$TempF <- tempDF$temperature * 9 / 5 + 32
+tempDF$DateTime <- as.POSIXct(tempDF$timestamp)
+tempDF$Date <- date(tempDF$DateTime)
+tempDF$DayOfYear <- yday(tempDF$DateTime)
+tempDF$fDayOfYear <- order(tempDF$DayOfYear)
+tempDF$TimeOfDay <- hms::as_hms(tempDF$DateTime)
+maxDate <- max(tempDF$Date)
+```
+
+```{r summary}
+dim(tempDF)
+names(tempDF)
+```
+
+## Latest Day
+
+```{r yesterday}
+tempDF |> dplyr::filter(Date == maxDate - 1) |>
+  ggplot(aes(x=TimeOfDay, y=TempF)) +
+    geom_line() +
+    ggtitle(paste("Living Room Temperature for", maxDate - 1))
+```
+
+## Latest Month
+
+```{r current_month}
+tempDF |> dplyr::filter(month(Date) == month(maxDate),
+    year(Date) == year(maxDate)) |>
+  ggplot(aes(x=DateTime, y=TempF)) +
+    geom_point(pch='.') +
+    ggtitle("Living Room Temperature for Current Month")
+```
+
+```{r smooth_current_month, eval=FALSE, echo=FALSE}
+tempDF |> dplyr::filter(month(Date) == month(maxDate),
+    year(Date) == year(maxDate))|>
+  ggplot(aes(x=DateTime, y=TempF)) +
+    geom_smooth() +
+    ggtitle("Smooth Living Room Temperature for Current Month")
+```
+
+## All Data
+
+```{r all}
+tempDF |> 
+  ggplot(aes(x=DateTime, y=TempF)) +
+    geom_point(pch='.') +
+    ggtitle("Living Room Temperatures Over the Years")
+```
+
+```{r all_by_year, fig.height=10}
+tempDF |> dplyr::mutate(Year = year(DateTime)) |>
+  ggplot(aes(x=DateTime, y=TempF)) +
+    geom_point(pch='.') +
+    facet_wrap(~ Year, ncol=1, scales="free_x")
+```
+
+## Warming Up the House
+Often during the cold months,
+the thermostat will be raised by 2 degrees,
+usually from 72 to 74.
+How does that show up in the living room temperature data?
+
+```{r thermostat_changes}
+thermo_dates <- c(
+  "2022-11-22", "2022-12-03", "2022-12-04", "2022-12-05", "2022-12-06",
+  "2022-12-08", "2022-12-09", "2022-12-10", "2022-12-12", "2022-12-14",
+  "2022-12-15", "2022-12-15", "2022-12-16", "2022-12-16",
+  "2022-12-17", "2022-12-20", "2022-12-21", "2022-12-21",
+  "2022-12-22", "2022-12-22", "2022-12-23", "2022-12-30",
+  "2022-12-31", "2023-01-01", "2023-01-03")
+thermo_times <- c("14:20", "16:02", "17:45", "12:00", "12:52",
+  "17:35", "17:10", "17:50", "15:50", "19:00", "9:12", "20:05",
+  "9:30", "19:15", "10:06", "12:25", "9:07", "18:12", "12:32",
+  "19:19", "18:00", "18:38", "13:40", "18:15", "18:09")
+thermoDF <- data.frame(DateTime=as.POSIXct(paste(thermo_dates, thermo_times)),
+  Date=as.Date(thermo_dates))
+thermoDF[["TimeOfDay"]] <- hms::as_hms(thermoDF$DateTime)
+thermoDF <- thermoDF |> dplyr::filter(Date != max(tempDF$Date))
+```
+
+```{r plot_thermostat_changes, fig.height=20}
+dt <- tempDF |> dplyr::filter(Date %in% thermoDF[["Date"]])
+dt |> ggplot(aes(x=TimeOfDay, y=TempF, g=Date)) +
+  geom_line() +
+  geom_vline(data=thermoDF, mapping=aes(xintercept=TimeOfDay),
+    lty=3, color="medium blue") +
+  facet_wrap(~ Date, ncol=1, scales="free_x")
+```

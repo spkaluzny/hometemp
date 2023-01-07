@@ -1,0 +1,88 @@
+---
+title: "Temperature Sensors Comparison"
+author: "Stephen Kaluzny"
+format:
+  html:
+    self-contained: true
+    theme: cerulean
+---
+Load packages.
+```{r packages, message=FALSE}
+library(ggplot2)
+```
+
+Source functions.
+```{r funs, message=FALSE}
+rdir <- here::here("R")
+source(file.path(rdir, "read_dht11.R"))
+source(file.path(rdir, "read_sqlite_bmp180.R"))
+```
+
+## Data
+
+The DHT11 sensor data from the Arduino logger.
+```{r dht11}
+d_dht11 <- read_dht11(here::here("data/dht11_living_room_20221229.csv"))
+```
+```{r dht11_info}
+dim(d_dht11)
+names(d_dht11)
+```
+
+The BMP180 sensor data form the RPi.
+```{r bmp180}
+d_bmp180 <- read_sqlite_bmp180(here::here("data/hometemp_BMP180.db"))
+```
+```{r bmp180_info}
+dim(d_bmp180)
+names(d_bmp180)
+```
+### Data Intersection
+
+Find the intersection of the dates from the two sensors.
+Take only full days observations.
+```{r}
+date_min <- min(d_dht11[["Date"]])
+date_max <- max(d_dht11[["Date"]])
+```
+
+```{r intersection}
+d_bmp180 <- d_bmp180 |> dplyr::filter(Date > date_min, Date < date_max)
+d_dht11 <- d_dht11 |> dplyr::filter(Date > date_min, Date < date_max)
+```
+
+```{r}
+range(d_dht11[["Date"]])
+range(d_bmp180[["Date"]])
+```
+
+```{r interpolate_bmp180}
+xy <- approx(d_bmp180[["DateTime"]], d_bmp180[["TempF"]],
+  xout=d_dht11[["DateTime"]])
+d_dht11[["TempF_bmp180"]] <- xy$y
+```
+
+
+```{r}
+d_both <- data.frame(
+  DateTime=c(d_bmp180[["DateTime"]], d_dht11[["DateTime"]]),
+  TempF=c(d_bmp180[["TempF"]], d_dht11[["TempF"]]),
+  Sensor=c(rep("bmp180", length=nrow(d_bmp180)),
+    rep("dht11", length=nrow(d_dht11))))
+d_both[["TimeOfDay"]] <- hms::as_hms(d_both[["DateTime"]])
+
+o <- order(d_both[, "DateTime"])
+d_both <- d_both[o,]
+```
+
+## Plots
+
+```{r plot01}
+d_both |> ggplot(aes(x=DateTime, y=TempF, color=Sensor)) +
+  geom_line()
+```
+```{r plot02}
+d_both |> ggplot(aes(x=TimeOfDay, y=TempF, color=Sensor)) +
+  geom_line() +
+  facet_wrap(~ lubridate::date(x=DateTime), scales="free_x")
+```
