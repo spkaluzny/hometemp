@@ -1,4 +1,4 @@
-read_dht11 <- function(file) {
+read_dht <- function(file) {
   d <- readr::read_csv(file)
   d[["DateTime"]] <- as.POSIXct(d[["datetime"]])
   if(any(names(d) == "humidity")) {
